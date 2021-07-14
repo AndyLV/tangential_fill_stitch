@@ -186,7 +186,6 @@ def rasterLineString2_Priority2(line, start_distance, end_distance, maxstitchdis
     k1 = 0
     k2 = 0
     startpoint_proj = 0
-<<<<<<< HEAD
 
     startpoint = path_coords.coords[j]
     startpoint_source = PointSource.EDGE_NEEDED
@@ -197,12 +196,6 @@ def rasterLineString2_Priority2(line, start_distance, end_distance, maxstitchdis
     #            print("HIIER FOUNDED1")  
 
     last_shifted_edge_points = [None, None]
-=======
-    returnpointlist.append(path_coords.coords[j])
-    returnpointsourcelist.append(PointSource.EDGE_NEEDED)
-    # if (abs(path_coords.coords[j][0]-9.8)< 0.2 and abs(path_coords.coords[j][1]-141.1)<0.2):
-    #    print("HIIER FOUNDED1")
->>>>>>> Fixed bug for line string equidistant rastering
 
     while i < len(Angles):
         while i < len(Angles)-1 and Angles[i] >= limiting_angle:
@@ -255,18 +248,12 @@ def rasterLineString2_Priority2(line, start_distance, end_distance, maxstitchdis
         proj_list = []
         while k1 < len(deque_points) and deque_points[k1][1]-start_distance < end_point_proj:
             # TODO maybe take not all points (e.g. EDGE NEEDED)
-<<<<<<< HEAD
             if deque_points[k1][0][3] != PointSource.EDGE_PREVIOUSLY_SHIFTED:
                 proj_list.append(
                     deque_points[k1][1]-startpoint_proj-start_distance)
             k1 += 1
 
 
-=======
-            proj_list.append(
-                deque_points[k2][1]-startpoint_proj-start_distance)
-            k2 += 1
->>>>>>> Fixed bug for line string equidistant rastering
 
         distributed_proj_list = distribute_points_proj2(
             Point(startpoint), Point(endpoint), proj_list, maxstitchdistance)
@@ -291,13 +278,8 @@ def rasterLineString2_Priority2(line, start_distance, end_distance, maxstitchdis
         for item in distributed_proj_list:
             returnpointlist.append(path_coords.interpolate(
                 item+startpoint_proj).coords[0])
-<<<<<<< HEAD
             #if (abs(returnpointlist[-1][0]-34)< 0.2 and abs(returnpointlist[-1][1]-165.6)<0.2):
             #    print("HIIER FOUNDED1")    
-=======
-            if (abs(returnpointlist[-1][0]-34)< 0.2 and abs(returnpointlist[-1][1]-165.6)<0.2):
-                print("HIIER FOUNDED1")    
->>>>>>> Fixed bug for line string equidistant rastering
             returnpointsourcelist.append(PointSource.REGULAR_SPACING)
         
         if (Point(endpoint).distance(Point(returnpointlist[-1])) > absoffset*constants.factor_offset_remove_points 
@@ -309,16 +291,9 @@ def rasterLineString2_Priority2(line, start_distance, end_distance, maxstitchdis
         startpoint = endpoint
         j = i
         i += 1
-<<<<<<< HEAD
         #if (abs(returnpointlist[-1][0]-10)< 0.2 and abs(returnpointlist[-1][1]-143.8)<0.2):
         #    print("HIIER FOUNDED1")  
 
-=======
-        returnpointlist.append(path_coords.coords[j])
-        returnpointsourcelist.append(PointSource.EDGE_NEEDED)
-        # if (abs(path_coords.coords[j][0]-9.8)< 0.2 and abs(path_coords.coords[j][1]-141.1)<0.2):
-        #    print("HIIER FOUNDED2")
->>>>>>> Fixed bug for line string equidistant rastering
 
     # TODO: Check whether the angle splitting was too lax so that we might need to add further EDGE_NEEDED afterwards to minimize the deviation to the original path
 
@@ -428,11 +403,7 @@ def distribute_points_proj2(start_point, end_point, transferPointList_proj, maxS
     #    return transferPointList_proj
 
     val, index = get_closest_value_index(transferPointList_proj, L/2)
-<<<<<<< HEAD
     #point = LineString([start_point, end_point]).interpolate(val)
-=======
-    point = LineString([start_point, end_point]).interpolate(val)
->>>>>>> Fixed bug for line string equidistant rastering
 
     delta = 0
     if index == len(transferPointList_proj)-1:

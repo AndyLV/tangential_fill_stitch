@@ -1,14 +1,11 @@
 *.pyc
-<<<<<<< HEAD
 *.svg
 *.png
 !kaninchenscaled.svg
+!Example.png
 DebuggingMethods.py
 removal_LineStringSampling.py
 removal_ConnectAndSamplePattern.py
 Dummy
 
 
-=======
-/test.svg
->>>>>>> Fixed bug for line string equidistant rastering
