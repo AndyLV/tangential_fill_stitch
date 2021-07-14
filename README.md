@@ -7,3 +7,4 @@ As stitching strategy you can use "Stitcher.StitchingStrategy.CLOSEST_POINT" (mi
 
 Example image for the rabbit:
 ![Example](Example.png)
+
