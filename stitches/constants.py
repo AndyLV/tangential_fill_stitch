@@ -1,5 +1,7 @@
+import math
+
 # Used in the simplify routine of shapely
-simplification_threshold = 0.1
+simplification_threshold = 0.01
 
 # If a transferred point is closer than this value to one of its neighbors, it will be checked whether it can be removed
 distance_thresh_remove_transferred_point = 0.15
@@ -27,3 +29,7 @@ factor_offset_remove_points=0.75 #if points are closer than absoffset*factor_off
 
 fac_offset_edge_shift = 0.25 #if an unshifted relevant edge is closer than absoffset*fac_offset_edge_shift to the line segment created by the shifted edge,
                             #the shift is allowed - otherwise the edge must not be shifted.
+
+limiting_angle = math.pi*3.5/180.0 #angles straighter (smaller) than this are considered as more or less straight (no concrete edges required for path segments having only angles <= this value)
+
+factor_offset_remove_dense_points=0.05 #if a point distance to the connected line of its two neighbors is smaller than absoffset times this factor, this point will be removed if the stitching distance will not be exceeded

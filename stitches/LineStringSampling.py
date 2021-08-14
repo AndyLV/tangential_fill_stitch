@@ -1,6 +1,6 @@
 #from sys import path
 #from typing import NoReturn
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from shapely.geometry.polygon import LineString
 from shapely.geometry import Point
 from shapely.ops import substring
@@ -8,7 +8,7 @@ import math
 import numpy as np
 from depq import DEPQ
 from enum import IntEnum
-import constants
+from stitches import constants
 
 #Used to tag the origin of a rastered point
 class PointSource(IntEnum):
@@ -22,18 +22,32 @@ class PointSource(IntEnum):
     
     #ADDITIONAL_TRACKING_POINT_NOT_NEEDED = 6 #Legacy
     #EDGE_RASTERING_ALLOWED = 7 #Legacy
-    EDGE_PREVIOUSLY_SHIFTED=8 #If an edge_needed was previously shifted the next edge (childs edge) should not be shifted in interlaced mode
+    EDGE_PREVIOUSLY_SHIFTED = 8 #If an edge_needed was previously shifted the next edge (childs edge) should not be shifted in interlaced mode
+    ENTER_LEAVING_POINT = 9 #Whether this point is used to enter or leave a child
 
 # Calculates the angles between adjacent edges at each interior point
-#Note that the resulting list has a lenght = len(line)-2 since for the boundary points no angle calculations were possible
+#Note that the first and last values in the return array are zero since for the boundary points no angle calculations were possible
 def calculate_line_angles(line):
     Angles = np.zeros(len(line.coords))
     for i in range(1, len(line.coords)-1):
         vec1 = np.array(line.coords[i])-np.array(line.coords[i-1])
-        vec2 = np.array(line.coords[i])-np.array(line.coords[i+1])
+        vec2 = np.array(line.coords[i+1])-np.array(line.coords[i])
         vec1length = np.linalg.norm(vec1)
         vec2length = np.linalg.norm(vec2)
         Angles[i] = math.acos(np.dot(vec1, vec2)/(vec1length*vec2length))
+    return Angles
+
+# Calculates the angles between adjacent edges at each interior point with a sign indicating whether the segment turns to the left (positive) or to the right (negative)
+#Note that the first and last values in the return array are zero since for the boundary points no angle calculations were possible
+def calculate_signed_line_angles(line):
+    Angles = np.zeros(len(line.coords))
+    for i in range(1, len(line.coords)-1):
+        vec1 = np.array(line.coords[i])-np.array(line.coords[i-1])
+        vec2 = np.array(line.coords[i+1])-np.array(line.coords[i])
+        vec1length = np.linalg.norm(vec1)
+        vec2length = np.linalg.norm(vec2)
+        z = np.cross(vec1,vec2)
+        Angles[i] = math.copysign(math.acos(np.dot(vec1, vec2)/(vec1length*vec2length)),z)
     return Angles
 
 
@@ -127,7 +141,7 @@ def check_edge_needed_shift_allowed(line, unshifted_point, shifted_point, absoff
 #-stitching_direction: =1 is stitched along line direction, =-1 if stitched in reversed order. Note that
 # start_distance > end_distance for stitching_direction = -1
 #-must_use_points_deque: deque with projected points on line from its neighbors. An item of the deque
-#is setup as follows: (projected point on line, index of point_origin, id(treenode origin), Sampler.PointSource), priority=distance along line)
+#is setup as follows: ((projected point on line, LineStringSampling.PointSource), priority=distance along line)
 #index of point_origin is the index of the point in the neighboring line
 #-absoffset: used offset between to offsetted curves
 #Output:
@@ -142,7 +156,7 @@ def rasterLineString2_Priority2(line, start_distance, end_distance, maxstitchdis
    
     deque_points = list(must_use_points_deque)
 
-    if len(deque_points) == 0:
+    if not deque_points:
         return rasterLineString2(substring(line, start_distance, end_distance), maxstitchdistance)
 
     linecoords = line.coords
@@ -166,28 +180,29 @@ def rasterLineString2_Priority2(line, start_distance, end_distance, maxstitchdis
     while (len(deque_points) > 0 and deque_points[-1][1] >= end_distance-min(maxstitchdistance/20, constants.point_spacing_to_be_considered_equal)):
         deque_points.pop()
 
-    if len(deque_points) == 0:
+    if not deque_points:
         return rasterLineString2(substring(line, start_distance, end_distance), maxstitchdistance)
 
 # Ordering in priority queue:
-#   (point, i, id(treenode), Sampler.PointSource), priority)
+#   (point, i, id(treenode), LineStringSampling.PointSource), priority)
 
     returnpointlist = []
     returnpointsourcelist = []
 
     path_coords = substring(LineString(linecoords),
                             start_distance, end_distance)
-    Angles = calculate_line_angles(path_coords)
+    signed_Angles = calculate_signed_line_angles(path_coords)
 
-    limiting_angle = math.pi*177.5/180.0
+    
 
-    j = 0
-    i = 1
-    k1 = 0
-    k2 = 0
+    segment_start_index = 0
+    segment_end_index = 1
+    dq_start_index = 0
+    dq_end_index_right = 0 #index within the deque whose point is straight "behind" the segment end
+    dq_end_index_left = 0 #index within the deque whose point is straight "before" the segment end
     startpoint_proj = 0
 
-    startpoint = path_coords.coords[j]
+    startpoint = path_coords.coords[segment_start_index]
     startpoint_source = PointSource.EDGE_NEEDED
 
     returnpointsourcelist.append(startpoint_source)
@@ -195,86 +210,106 @@ def rasterLineString2_Priority2(line, start_distance, end_distance, maxstitchdis
     #if (abs(returnpointlist[-1][0]-13.2)< 0.2 and abs(returnpointlist[-1][1]-141.4)<0.2):
     #            print("HIIER FOUNDED1")  
 
-    last_shifted_edge_points = [None, None]
+    #last_shifted_edge_points = [None, None]
 
-    while i < len(Angles):
-        while i < len(Angles)-1 and Angles[i] >= limiting_angle:
-            i += 1
-        while k1 < len(deque_points) and deque_points[k1][1]-start_distance < startpoint_proj:
-            k1 += 1
+    #We divide the line into segments separated by angles which are not negligble straight
+    while segment_end_index < len(signed_Angles):
+        current_angle_sum = 0
+        while segment_end_index < len(signed_Angles)-1 and abs(current_angle_sum+signed_Angles[segment_end_index]) <= constants.limiting_angle:
+            current_angle_sum+=signed_Angles[segment_end_index]
+            segment_end_index += 1
 
-        #Get final index:
-        k2 = k1
-        end_point_proj = path_coords.project(Point(path_coords.coords[i]))
-        while k2 < len(deque_points) and deque_points[k2][1]-start_distance < end_point_proj:
-            k2 += 1    
-        k3 = k2-1
+        #Get the starting index within deque_points belonging to the current segment
+        while dq_start_index < len(deque_points) and deque_points[dq_start_index][1]-start_distance < startpoint_proj:
+            dq_start_index += 1
 
-        if (abs(path_coords.coords[i][0]-38.6)< 0.2 and abs(path_coords.coords[i][1]-131.0)<0.2):
+        #Get end index within deque_points for the current segment:
+        dq_end_index_right = dq_start_index
+        end_point_proj = path_coords.project(Point(path_coords.coords[segment_end_index]))
+        while dq_end_index_right < len(deque_points) and deque_points[dq_end_index_right][1]-start_distance < end_point_proj:
+            dq_end_index_right += 1    
+        dq_end_index_left = dq_end_index_right-1
+
+        #if (abs(path_coords.coords[segment_end_index][0]-82.259859301875)< 0.2 and abs(path_coords.coords[segment_end_index][1]-98.03874253852013)<0.2):
+       #     print("HIIER FOUNDED1")  
+
+        if (abs(path_coords.coords[segment_end_index][0]-83.86)< 0.2 and abs(path_coords.coords[segment_end_index][1]-92.2)<0.2):
             print("HIIER FOUNDED1")  
 
+        
+        #We check the deque_points close to the end point (edge) of the segment. If there is no point source coming from an shifted edge we are allowed to shift the edge of this segment.
+        #By this we create an interlaced structure - every second row will be shifted.
+        #TODO TODO check whether starting with dq_end_index_left or dq_end_index_right
+        dq_iter = dq_end_index_left
         found_EDGE_Needed_and_not_edge_shifted = False
         found_index = -1
         
-        if not(k2 < len(deque_points) and deque_points[k2][1]-start_distance <= end_point_proj+absoffset and deque_points[k2][0][3] == PointSource.EDGE_PREVIOUSLY_SHIFTED):
-            while k3 > 0 and deque_points[k3][1]-start_distance >= max(startpoint_proj,end_point_proj- maxstitchdistance/2.0)  and k2-k3 < 4: #look max 3 points ahead
-                if deque_points[k3][0][3] == PointSource.EDGE_PREVIOUSLY_SHIFTED:
+        if not(dq_iter < len(deque_points) and deque_points[dq_iter][1]-start_distance <= end_point_proj+absoffset and deque_points[dq_iter][0].point_source == PointSource.EDGE_PREVIOUSLY_SHIFTED):
+            while dq_iter > 0 and deque_points[dq_iter][1]-start_distance >= max(startpoint_proj,end_point_proj- maxstitchdistance/2.0)  and dq_end_index_right-dq_iter < 4: #look max 3 points to the left of the end segment
+                if deque_points[dq_iter][0].point_source == PointSource.EDGE_PREVIOUSLY_SHIFTED:
                     found_EDGE_Needed_and_not_edge_shifted = False
                     break
-                elif not found_EDGE_Needed_and_not_edge_shifted and (deque_points[k3][0][3] == PointSource.EDGE_NEEDED or deque_points[k3][0][3] == PointSource.INITIAL_RASTERING):
-                    found_index = k3
+                elif not found_EDGE_Needed_and_not_edge_shifted and (deque_points[dq_iter][0].point_source == PointSource.EDGE_NEEDED or deque_points[dq_iter][0].point_source == PointSource.INITIAL_RASTERING):
+                    found_index = dq_iter
                     found_EDGE_Needed_and_not_edge_shifted = True
-                k3 -= 1
+                dq_iter -= 1
 
-        endpoint = path_coords.coords[i]
+        endpoint = path_coords.coords[segment_end_index]
         endpoint_source = PointSource.EDGE_NEEDED
 
         if  found_EDGE_Needed_and_not_edge_shifted:
-            if i < len(path_coords.coords)-1:
-                found_EDGE_Needed_and_not_edge_shifted = check_edge_needed_shift_allowed(path_coords,Point(endpoint), Point(deque_points[found_index][0][0].coords[0]),absoffset, Point(endpoint).distance(Point(path_coords.coords[i+1])))
+            if segment_end_index < len(path_coords.coords)-1:
+                found_EDGE_Needed_and_not_edge_shifted = check_edge_needed_shift_allowed(path_coords,Point(endpoint), Point(deque_points[found_index][0].point.coords[0]),absoffset, Point(endpoint).distance(Point(path_coords.coords[segment_end_index+1])))
             else:
-                found_EDGE_Needed_and_not_edge_shifted = check_edge_needed_shift_allowed(path_coords,Point(endpoint), Point(deque_points[found_index][0][0].coords[0]),absoffset, -1)
+                found_EDGE_Needed_and_not_edge_shifted = check_edge_needed_shift_allowed(path_coords,Point(endpoint), Point(deque_points[found_index][0].point.coords[0]),absoffset, -1)
             if found_EDGE_Needed_and_not_edge_shifted:
-                #if (abs( deque_points[found_index][0][0].coords[0][0]-90.0)< 0.2 and abs( deque_points[found_index][0][0].coords[0][1]-174.5)<0.2):
+                #if (abs( deque_points[found_index].point[0].coords[0][0]-90.0)< 0.2 and abs( deque_points[found_index].point[0].coords[0][1]-174.5)<0.2):
                 #    print("HIIER FOUNDED1")
-                #if(deque_points[found_index][0][0].distance(Point(startpoint)) > constants.fact_offset_edge_shift_remaining_line_length*absoffset):
-                last_shifted_edge_points.pop(0)
-                last_shifted_edge_points.append(Point(endpoint))      
-                endpoint =  deque_points[found_index][0][0].coords[0]
+                #if(deque_points[found_index].point[0].distance(Point(startpoint)) > constants.fact_offset_edge_shift_remaining_line_length*absoffset):
+                #last_shifted_edge_points.pop(0)
+                #last_shifted_edge_points.append(Point(endpoint))
+                
+                #If the shift is allowed we replace the segments endpoint by a projected point which lies within the segment (shifting towards inner)       
+                endpoint =  deque_points[found_index][0].point.coords[0]
                 end_point_proj = path_coords.project(Point(endpoint))
                 endpoint_source = PointSource.EDGE_PREVIOUSLY_SHIFTED
 
-       
+        #Collect all deque points within the segment in an extra list 
         proj_list = []
-        while k1 < len(deque_points) and deque_points[k1][1]-start_distance < end_point_proj:
+        while dq_start_index < len(deque_points) and deque_points[dq_start_index][1]-start_distance < end_point_proj:
             # TODO maybe take not all points (e.g. EDGE NEEDED)
-            if deque_points[k1][0][3] != PointSource.EDGE_PREVIOUSLY_SHIFTED:
+            if deque_points[dq_start_index][0].point_source != PointSource.EDGE_PREVIOUSLY_SHIFTED:
                 proj_list.append(
-                    deque_points[k1][1]-startpoint_proj-start_distance)
-            k1 += 1
+                    deque_points[dq_start_index][1]-startpoint_proj-start_distance)
+            dq_start_index += 1
 
 
-
+        #Distribute the points within the current segment using the projected points from the deque
         distributed_proj_list = distribute_points_proj2(
             Point(startpoint), Point(endpoint), proj_list, maxstitchdistance)
 
+        # if the end point of the previous segment (= start point of this segment) was shifted (shift is always towards the inner of the segment),
+        # we need to check here whether this shift was ok from the perspective of this segment
         if returnpointsourcelist[-1] == PointSource.EDGE_PREVIOUSLY_SHIFTED and distributed_proj_list:
-            last_shifted_edge_point = last_shifted_edge_points[0] #assumed endpoint_source == PointSource.EDGE_PREVIOUSLY_SHIFTED, so last_shifted_edge_points[1] contains the end-edge_point of this segment
-            if endpoint_source != PointSource.EDGE_PREVIOUSLY_SHIFTED:
-                last_shifted_edge_point = last_shifted_edge_points[1]
-            next_point = path_coords.interpolate(distributed_proj_list[0]+startpoint_proj)
+            last_shifted_edge_point = path_coords.coords[segment_start_index]
+            next_point = path_coords.interpolate(distributed_proj_list[0]+startpoint_proj) #the first point after the shifted edge
             bisectorline = LineString([next_point, Point(returnpointlist[-1])])
             distance = bisectorline.distance(last_shifted_edge_point)
-            if distance > constants.fac_offset_edge_shift*absoffset:
+            if distance > constants.fac_offset_edge_shift*absoffset: #The shift induced deviation to the path is too large - we either unshift the shifted point or add the unshifted point additionally
+                
                 if len(returnpointlist) > 1 and last_shifted_edge_point.distance(Point(returnpointlist[-2])) > maxstitchdistance :
+                    #We cannot simply unshift the point since this would induce a too large distance between the next-to-last point in the previous segement and the unshifted point (which moved away from this point compared to the shifted one)
+                    #Hence we add the unshifted point in addition to fulfill the maxstitchdistance constraint.
                     returnpointlist.append(last_shifted_edge_point.coords[0])
                     returnpointsourcelist.append(PointSource.EDGE_NEEDED)
-                else:
+                else: 
+                    #Unshift the point
                     returnpointlist.pop()
                     returnpointsourcelist.pop()
                     returnpointlist.append(last_shifted_edge_point.coords[0])
                     returnpointsourcelist.append(PointSource.EDGE_NEEDED)
                 
+        #Add the points to the return list
         for item in distributed_proj_list:
             returnpointlist.append(path_coords.interpolate(
                 item+startpoint_proj).coords[0])
@@ -282,6 +317,7 @@ def rasterLineString2_Priority2(line, start_distance, end_distance, maxstitchdis
             #    print("HIIER FOUNDED1")    
             returnpointsourcelist.append(PointSource.REGULAR_SPACING)
         
+        #Add the end point only if it is not too close
         if (Point(endpoint).distance(Point(returnpointlist[-1])) > absoffset*constants.factor_offset_remove_points 
                     or endpoint_source == PointSource.EDGE_PREVIOUSLY_SHIFTED): #The "or endpoint_source == PointSource.EDGE_PREVIOUSLY_SHIFTED" is necessary since shifting can bring points very close together 
                                                                                 #and if we do not add it here we do not know that the previous point was shifted in the next round
@@ -289,8 +325,8 @@ def rasterLineString2_Priority2(line, start_distance, end_distance, maxstitchdis
             returnpointsourcelist.append(endpoint_source)
         startpoint_proj = end_point_proj
         startpoint = endpoint
-        j = i
-        i += 1
+        segment_start_index = segment_end_index
+        segment_end_index += 1
         #if (abs(returnpointlist[-1][0]-10)< 0.2 and abs(returnpointlist[-1][1]-143.8)<0.2):
         #    print("HIIER FOUNDED1")  
 
@@ -472,3 +508,11 @@ def distribute_points_proj2(start_point, end_point, transferPointList_proj, maxS
         current_val += delta_right
 
     return returnlist
+
+
+if __name__ == "__main__":
+    line = LineString([(0,0), (1,0), (2,1),(3,0),(4,0)])
+
+    print(calculate_line_angles(line)*180.0/math.pi)
+
+    print(calculate_signed_line_angles(line)*180.0/math.pi)

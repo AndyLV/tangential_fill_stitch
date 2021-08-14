@@ -1,9 +1,13 @@
-import constants
-import LineStringSampling as Sampler
+from stitches import constants
+from stitches import LineStringSampling
 from shapely.geometry import  Point, MultiPoint
 from shapely.geometry.polygon import LineString, LinearRing
+from collections import namedtuple
 from shapely.ops import nearest_points
 import math
+
+projected_point_tuple = namedtuple('projected_point_tuple', ['point', 'point_source'])
+
 
 #Takes the current tree item and its rastered points (treenode.val and its origin treenode.pointsourcelist) and transfers it to parent and siblings.
 # To do so it calculates the current normal and determines its intersection with the neighbors which gives the transferred points.
@@ -16,7 +20,7 @@ import math
 #-transfer_to_parent: Shall the points also be transferred to the parent (=True) or only to the siblings (=False)
 #Output:
 #-Fills the attribute "transferred_point_priority_deque" of the siblings and parent in the tree datastructure.  An item of the deque
-#is setup as follows: (projected point on line, index of point_origin, id(treenode origin), Sampler.PointSource), priority=distance along line)
+#is setup as follows: ((projected point on line, LineStringSampling.PointSource), priority=distance along line)
 #index of point_origin is the index of the point in the neighboring line
 def transfer_inner_points_to_surrounding2(treenode, used_offset, offset_by_half, max_stitching_distance, transfer_to_siblings_childs=True, transfer_to_parent=True):
     # if(treenode.id == 'hole' and not LinearRing(treenode.val).is_ccw):
@@ -80,20 +84,20 @@ def transfer_inner_points_to_surrounding2(treenode, used_offset, offset_by_half,
         #    print("HIER gefunden!")
         #need_additional_nearest_neighbor = False
 
-        point_source =  point_source_list[i] #Sampler.PointSource.MUST_USE
-
+        point_source =  point_source_list[i] #LineStringSampling.PointSource.MUST_USE
+        assert(point_source != LineStringSampling.PointSource.ENTER_LEAVING_POINT)
         # We do not transfer points which were only characteristic ("fix") to the geometry of the source
-        #if(offset_by_half and point_source_list[i] == Sampler.PointSource.EDGE_NEEDED and
-        #        point_source_list[(i+1) % len(point_list)] == Sampler.PointSource.EDGE_NEEDED):
-        #    point_source = Sampler.PointSource.EDGE_RASTERING_ALLOWED
+        #if(offset_by_half and point_source_list[i] == LineStringSampling.PointSource.EDGE_NEEDED and
+        #        point_source_list[(i+1) % len(point_list)] == LineStringSampling.PointSource.EDGE_NEEDED):
+        #    point_source = LineStringSampling.PointSource.EDGE_RASTERING_ALLOWED
         
-        if(offset_by_half and point_source_list[(i+1) % len(point_list)] == Sampler.PointSource.EDGE_PREVIOUSLY_SHIFTED):
-            point_source = Sampler.PointSource.EDGE_PREVIOUSLY_SHIFTED
-        #elif(point_source_list[i] == Sampler.PointSource.EDGE_NEEDED):
-        #    point_source = Sampler.PointSource.NOT_NEEDED
-        elif(point_source_list[i] == Sampler.PointSource.ALREADY_TRANSFERRED):# or
-             #point_source_list[i] == Sampler.PointSource.NOT_NEEDED or
-             #point_source_list[i] == Sampler.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED):
+        if(offset_by_half and point_source_list[(i+1) % len(point_list)] == LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED):
+            point_source = LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED
+        #elif(point_source_list[i] == LineStringSampling.PointSource.EDGE_NEEDED):
+        #    point_source = LineStringSampling.PointSource.NOT_NEEDED
+        elif(point_source_list[i] == LineStringSampling.PointSource.ALREADY_TRANSFERRED):# or
+             #point_source_list[i] == LineStringSampling.PointSource.NOT_NEEDED or
+             #point_source_list[i] == LineStringSampling.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED):
             currentDistance += point_list[i].distance(
                 point_list[(i+1) % len(point_list)])
             i += 1
@@ -132,12 +136,12 @@ def transfer_inner_points_to_surrounding2(treenode, used_offset, offset_by_half,
 
         # We do not transfer points which were only characteristic ("fix") to the geometry of the source
         # Since offset_by_half depends also on the following point, we need to check this point, too
-        #if((offset_by_half and point_source_list[(i+1) % len(point_list)] == Sampler.PointSource.EDGE_NEEDED) and
-        #        point_source_list[i] != Sampler.PointSource.EDGE_NEEDED):
-        #    point_source = Sampler.PointSource.NOT_NEEDED
-        if(offset_by_half and point_source_list[(i+1) % len(point_list)] == Sampler.PointSource.ALREADY_TRANSFERRED):# or
-             #offset_by_half and point_source_list[(i+1) % len(point_list)] == Sampler.PointSource.NOT_NEEDED or
-             #offset_by_half and point_source_list[(i+1) % len(point_list)] == Sampler.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED):
+        #if((offset_by_half and point_source_list[(i+1) % len(point_list)] == LineStringSampling.PointSource.EDGE_NEEDED) and
+        #        point_source_list[i] != LineStringSampling.PointSource.EDGE_NEEDED):
+        #    point_source = LineStringSampling.PointSource.NOT_NEEDED
+        if(offset_by_half and point_source_list[(i+1) % len(point_list)] == LineStringSampling.PointSource.ALREADY_TRANSFERRED):# or
+             #offset_by_half and point_source_list[(i+1) % len(point_list)] == LineStringSampling.PointSource.NOT_NEEDED or
+             #offset_by_half and point_source_list[(i+1) % len(point_list)] == LineStringSampling.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED):
             i += 1
             currentDistance += next_spacing
             continue
@@ -200,11 +204,12 @@ def transfer_inner_points_to_surrounding2(treenode, used_offset, offset_by_half,
                 # if abs(point.coords[0][0]-58) < 0.5 and abs(point.coords[0][1]-132) < 0.5:
                 #    print("HIER gefunden!")
                 # its a sibling - the transferred point to this sibling needs to be transferred to the siblings childs afterwards
-                if transfer_to_siblings_childs and neighbor.parent == treenode.parent and point_source != Sampler.PointSource.NOT_NEEDED:
+                if transfer_to_siblings_childs and neighbor.parent == treenode.parent and point_source != LineStringSampling.PointSource.NOT_NEEDED:
                     to_transfer_points_per_sibling[id(neighbor)].append(point)
                     # neighbor.to_transfer.append(point)
-                neighbor.transferred_point_priority_deque.insert(
-                    (point, i, id(treenode), point_source), priority)  # We add also i as well as the source id as information which is helpful later to detect interrupted transferred points to the parent (e.g. because another sibling was closer)
+                neighbor.transferred_point_priority_deque.insert(projected_point_tuple(point=point, point_source=point_source), priority)
+                #neighbor.transferred_point_priority_deque.insert(
+                #    (point, i, id(treenode), point_source), priority)  # We add also i as well as the source id as information which is helpful later to detect interrupted transferred points to the parent (e.g. because another sibling was closer)
 
             #if need_additional_nearest_neighbor:
                 # if abs(point_list[i].coords[0][0]-10.4) < 0.2 and abs(point_list[i].coords[0][1]-14) < 0.2:
@@ -217,7 +222,7 @@ def transfer_inner_points_to_surrounding2(treenode, used_offset, offset_by_half,
                 #if add_point.distance(point_list[i]) < constants.offset_factor_for_adjacent_geometry*abs(used_offset):
                 #    priority = neighbor.val.project(add_point)
                 #    neighbor.transferred_point_priority_deque.insert(
-                #        (add_point, i, id(treenode), Sampler.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED), priority)
+                #        (add_point, i, id(treenode), LineStringSampling.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED), priority)
 
         i += 1
         currentDistance += next_spacing
@@ -243,7 +248,7 @@ def transfer_inner_points_to_surrounding2(treenode, used_offset, offset_by_half,
 #-to_transfer_points_origin: The origin tag of each point in to_transfer_points
 #Output:
 #-Fills the attribute "transferred_point_priority_deque" of the siblings and parent in the tree datastructure. An item of the deque
-#is setup as follows: (projected point on line, index of point_origin, id(treenode origin), Sampler.PointSource), priority=distance along line)
+#is setup as follows: ((projected point on line, LineStringSampling.PointSource), priority=distance along line)
 #index of point_origin is the index of the point in the neighboring line
 def transfer_transferred_points_also_to_childs(treenode, used_offset, offset_by_half, max_stitching_distance, to_transfer_points, recursive=True, to_transfer_points_origin=[]):
    # checkTree(treenode)
@@ -295,7 +300,7 @@ def transfer_transferred_points_also_to_childs(treenode, used_offset, offset_by_
     i = 0
     while i < len(point_list):
         currentDistance = closedLine.project(point_list[i])
-
+        assert(to_transfer_points_origin[i] != LineStringSampling.PointSource.ENTER_LEAVING_POINT)
 #        if abs(point_list[i].coords[0][0]-28.1) < 0.2 and abs(point_list[i].coords[0][1]-94.9) < 0.2:
 #            print("HIIIIIIIIIIIERRR")
 
@@ -403,6 +408,8 @@ def transfer_transferred_points_also_to_childs(treenode, used_offset, offset_by_
             desired_point = Point()
             if result.geom_type == 'Point':
                 desired_point = result
+            elif result.geom_type == 'LineString':
+                desired_point = Point(result.coords[0])
             else:
                 resultlist = list(result)
                 desired_point = resultlist[0]
@@ -418,16 +425,18 @@ def transfer_transferred_points_also_to_childs(treenode, used_offset, offset_by_
             if(recursive):
                 transfer_point_list_child.append(point)
             if(to_transfer_points_origin):
-                if offset_by_half and to_transfer_points_origin[(i+1)%len(to_transfer_points_origin)] == Sampler.PointSource.EDGE_PREVIOUSLY_SHIFTED:
-                    child.transferred_point_priority_deque.insert(
-                        (point, i, id(treenode),  Sampler.PointSource.EDGE_PREVIOUSLY_SHIFTED), priority)  # We add also i as well as the source id as information which is helpful later to detect interrupted transferred points to the parent (e.g. because another sibling was closer)
+                if offset_by_half and to_transfer_points_origin[(i+1)%len(to_transfer_points_origin)] == LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED:
+                    #child.transferred_point_priority_deque.insert(
+                    #    (point, i, id(treenode),  LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED), priority)  # We add also i as well as the source id as information which is helpful later to detect interrupted transferred points to the parent (e.g. because another sibling was closer)
+                    child.transferred_point_priority_deque.insert(projected_point_tuple(point=point, point_source=LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED), priority)
                 else:
-                   child.transferred_point_priority_deque.insert(
-                        (point, i, id(treenode), to_transfer_points_origin[i]), priority)  # We add also i as well as the source id as information which is helpful later to detect interrupted transferred points to the parent (e.g. because another sibling was closer) 
+                   #child.transferred_point_priority_deque.insert(
+                   #     (point, i, id(treenode), to_transfer_points_origin[i]), priority)  # We add also i as well as the source id as information which is helpful later to detect interrupted transferred points to the parent (e.g. because another sibling was closer) 
+                    child.transferred_point_priority_deque.insert(projected_point_tuple(point = point, point_source=to_transfer_points_origin[i]), priority)        
             else:
-                child.transferred_point_priority_deque.insert(
-                    (point, i, id(treenode), Sampler.PointSource.ALREADY_TRANSFERRED), priority)  # We add also i as well as the source id as information which is helpful later to detect interrupted transferred points to the parent (e.g. because another sibling was closer)
-                
+                #child.transferred_point_priority_deque.insert(
+                #    (point, i, id(treenode), LineStringSampling.PointSource.ALREADY_TRANSFERRED), priority)  # We add also i as well as the source id as information which is helpful later to detect interrupted transferred points to the parent (e.g. because another sibling was closer)
+                child.transferred_point_priority_deque.insert(projected_point_tuple(point=point, point_source=LineStringSampling.PointSource.ALREADY_TRANSFERRED), priority)
         i += 1
 
     if(recursive):

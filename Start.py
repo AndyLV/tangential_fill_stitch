@@ -1,8 +1,8 @@
 import svgwrite
 import svgtoshapes as svgtoshapes
-import StitchPattern as Stitcher
+from stitches import StitchPattern
 from shapely.geometry.polygon import LinearRing
-from shapely.geometry import Polygon,JOIN_STYLE
+from shapely.geometry import Polygon,JOIN_STYLE, Point
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -12,11 +12,11 @@ def drawresult(resultcoords, resultcoords_Origin, colorString):
     plt.gca().invert_yaxis()
     plt.plot(*zip(*resultcoords), colorString)
 
-    colormap = np.array(['r', 'g', 'b', 'c', 'm', 'y', 'k', 'gray', 'm'])
+    colormap = np.array(['r', 'g', 'b', 'c', 'm', 'y', 'k', 'gray', 'm','r'])
     labelmap = np.array(['MUST_USE', 'REGULAR_SPACING', 'INITIAL_RASTERING', 'EDGE_NEEDED', 'NOT_NEEDED',
-                        'ALREADY_TRANSFERRED', 'ADDITIONAL_TRACKING_POINT_NOT_NEEDED', 'EDGE_RASTERING_ALLOWED', 'EDGE_PREVIOUSLY_SHIFTED'])
+                        'ALREADY_TRANSFERRED', 'ADDITIONAL_TRACKING_POINT_NOT_NEEDED', 'EDGE_RASTERING_ALLOWED', 'EDGE_PREVIOUSLY_SHIFTED', 'ENTER_LEAVING_POINT'])
 
-    for i in range(0, 8+1):
+    for i in range(0, 9+1):
         # if i != Sampler.PointSource.EDGE_NEEDED and i != Sampler.PointSource.INITIAL_RASTERING:
         #    continue
         selection = []
@@ -35,14 +35,14 @@ def drawresult(resultcoords, resultcoords_Origin, colorString):
 
 if __name__ == "__main__":
     mmtopx = 3.77376            #factor from mm to pixel
-    offset = 0.25  # mm         #used offset
+    offset = 0.125  # mm         #used offset
     stitchlength = 3.0  # mm    #used maximum stitch distance
-    filename_input = './kaninchenscaled.svg' #Stitch a svg file (note that the svg file must not contain splines - only straight line segments)
+    filename_input = './Debug2.svg' #Stitch a svg file (note that the svg file must not contain splines - only straight line segments)
     #If filename_input is empty a rectangle with a hole will be stitched as demo
     filename_output = './output.svg'
     joint_style = JOIN_STYLE.mitre #https://shapely.readthedocs.io/en/stable/_images/parallel_offset.png
     interlaced = True
-    strategy = Stitcher.StitchingStrategy.CLOSEST_POINT
+    strategy = StitchPattern.StitchingStrategy.INNER_TO_OUTER
 
     mypoly = Polygon()
     if filename_input=='':
@@ -58,11 +58,21 @@ if __name__ == "__main__":
         mypoly = Polygon(outerring, holes=[innerring])
     else:
         result = list(svgtoshapes.svgtoshapes(filename_input))
-        mypoly = Polygon(result[0])
+        if len(result) == 1:
+            mypoly = Polygon(result[0])
+        else:
+            mypoly = Polygon(result[0], [result[1]])
     
+ #   fig, axs = plt.subplots(1, 1)
+ #   axs.axis('equal')
+ #   plt.gca().invert_yaxis()
+ #   x2, y2 = mypoly.exterior.coords.xy
+ #   plt.plot(x2, y2, 'r')
+ #   plt.show(block=True)
+
     
-    connectedLine, connectedLineOrigin = Stitcher.offsetPoly(
-        mypoly, -offset*mmtopx, joint_style, stitchlength*mmtopx, interlaced,strategy)
+    connectedLine, connectedLineOrigin = StitchPattern.offsetPoly(
+        mypoly, -offset*mmtopx, joint_style, stitchlength*mmtopx, interlaced,strategy, Point(0,0))
 
     dwg = svgwrite.Drawing('output.svg', profile='full')
     dwg.add(dwg.polyline(connectedLine,

@@ -4,10 +4,11 @@ from shapely.ops import  polygonize
 from shapely.geometry import MultiPolygon
 from anytree import AnyNode, PreOrderIter
 from shapely.geometry.polygon import orient
-import ConnectAndSamplePattern as ConnectAndSample
+from stitches import ConnectAndSamplePattern
 from depq import DEPQ
-import constants
+from stitches import constants
 from enum import IntEnum
+from stitches import DebuggingMethods
 
 
 # Problem: When shapely offsets a LinearRing the start/end point might be handled wrongly since they are only treated as LineString.
@@ -112,7 +113,7 @@ class StitchingStrategy(IntEnum):
 #Output:
 #-List of point coordinate tuples
 #-Tag (origin) of each point to analyze why a point was placed at this position
-def offsetPoly(poly, offset, joinstyle, stitchdistance, offset_by_half, strategy):
+def offsetPoly(poly, offset, joinstyle, stitchdistance, offset_by_half, strategy, starting_point):
     orderedPoly = orient(poly, -1)
     orderedPoly = orderedPoly.simplify(
         constants.simplification_threshold, False)
@@ -201,16 +202,16 @@ def offsetPoly(poly, offset, joinstyle, stitchdistance, offset_by_half, strategy
                 previoushole.parent = curPoly
 
 
-   # DBG.drawPoly(root, 'r-')
+   # DebuggingMethods.drawPoly(root, 'r-')
 
     Make_tree_uniform_cw_ccw(root)
     # print(RenderTree(root))
     if strategy == StitchingStrategy.CLOSEST_POINT:
-        connectedLine, connectedLineOrigin = ConnectAndSample.connect_raster_tree_nearest_neighbor(
-                root, offset, stitchdistance, Point(0, 0), offset_by_half)
+        connectedLine, connectedLineOrigin = ConnectAndSamplePattern.connect_raster_tree_nearest_neighbor(
+                root, offset, stitchdistance, starting_point, offset_by_half)
     elif strategy == StitchingStrategy.INNER_TO_OUTER:
-        connectedLine, connectedLineOrigin = ConnectAndSample.connect_raster_tree_from_inner_to_outer(
-            root, offset, stitchdistance, Point(0, 0), offset_by_half)
+        connectedLine, connectedLineOrigin = ConnectAndSamplePattern.connect_raster_tree_from_inner_to_outer(
+            root, offset, stitchdistance, starting_point, offset_by_half)
     else:
         print("Invalid strategy!")
         assert(0)
