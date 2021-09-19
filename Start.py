@@ -12,11 +12,16 @@ def drawresult(resultcoords, resultcoords_Origin, colorString):
     plt.gca().invert_yaxis()
     plt.plot(*zip(*resultcoords), colorString)
 
-    colormap = np.array(['r', 'g', 'b', 'c', 'm', 'y', 'k', 'gray', 'm','r'])
+    colormap = np.array(['r', 'g', 'b', 'c', 'm', 'y', 'k', 'gray', 'm','r', 'gray','k','b','c','gray','k','r','gray','y'])
     labelmap = np.array(['MUST_USE', 'REGULAR_SPACING', 'INITIAL_RASTERING', 'EDGE_NEEDED', 'NOT_NEEDED',
-                        'ALREADY_TRANSFERRED', 'ADDITIONAL_TRACKING_POINT_NOT_NEEDED', 'EDGE_RASTERING_ALLOWED', 'EDGE_PREVIOUSLY_SHIFTED', 'ENTER_LEAVING_POINT'])
+                        'ALREADY_TRANSFERRED', 'ADDITIONAL_TRACKING_POINT_NOT_NEEDED', 'EDGE_RASTERING_ALLOWED', 
+                        'EDGE_PREVIOUSLY_SHIFTED', 'ENTER_LEAVING_POINT', 'SOFT_EDGE', 'HARD_EDGE', 'PROJECTED_POINT',
+                        'MAX_DISTANCE','FORBIDDEN_POINT','SOFT_EDGE', 'HARD_EDGE','FFORBIDDEN_POINT','REPLACED_FORBIDDEN_POINT'])
 
-    for i in range(0, 9+1):
+                            
+
+
+    for i in range(0, 18+1):
         # if i != Sampler.PointSource.EDGE_NEEDED and i != Sampler.PointSource.INITIAL_RASTERING:
         #    continue
         selection = []
@@ -29,15 +34,18 @@ def drawresult(resultcoords, resultcoords_Origin, colorString):
   #  plt.scatter(*zip(*resultcoords),
   #              c=colormap[resultcoords_Origin])
     axs.legend()
+    #axs.set_xlim([34, 48])
+    #axs.set_ylim([7,0])
     plt.show(block=True)
 
 
 
 if __name__ == "__main__":
     mmtopx = 3.77376            #factor from mm to pixel
-    offset = 0.125  # mm         #used offset
+    offset = 0.25  # mm         #used offset
     stitchlength = 3.0  # mm    #used maximum stitch distance
-    filename_input = './Debug2.svg' #Stitch a svg file (note that the svg file must not contain splines - only straight line segments)
+    #'./kaninchenscaled.svg'  #
+    filename_input ='./Debug2.svg'#'./kaninchenscaled.svg' # './Debug2.svg' #Stitch a svg file (note that the svg file must not contain splines - only straight line segments)
     #If filename_input is empty a rectangle with a hole will be stitched as demo
     filename_output = './output.svg'
     joint_style = JOIN_STYLE.mitre #https://shapely.readthedocs.io/en/stable/_images/parallel_offset.png
@@ -82,7 +90,7 @@ if __name__ == "__main__":
                          stroke_linejoin="round",
                          stroke_linecap="round"))
     dwg.save()
-
+    print("Number of stitches: ", len(connectedLine))
     drawresult(connectedLine, connectedLineOrigin, 'r-')
 
 

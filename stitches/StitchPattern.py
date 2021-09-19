@@ -202,7 +202,7 @@ def offsetPoly(poly, offset, joinstyle, stitchdistance, offset_by_half, strategy
                 previoushole.parent = curPoly
 
 
-   # DebuggingMethods.drawPoly(root, 'r-')
+    #DebuggingMethods.drawPoly(root, 'r-')
 
     Make_tree_uniform_cw_ccw(root)
     # print(RenderTree(root))

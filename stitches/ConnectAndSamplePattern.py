@@ -42,20 +42,6 @@ def cyclic_distance(val1, val2, line_length):
 
 
 
-def remove_dense_points(connectedLine, connectedLineOrigin,stitchdistance,absoffset):
-    i = 1
-    while i < len(connectedLine)-1:
-        line_segment = LineString([connectedLine[i-1], connectedLine[i+1]])
-        if line_segment.length > stitchdistance:
-            i+=1
-            continue
-        distance = Point(connectedLine[i]).distance(line_segment)
-        if distance < absoffset*constants.factor_offset_remove_dense_points:
-            connectedLine.pop(i)
-            connectedLineOrigin.pop(i)
-        else:
-            i+=1
-    return connectedLine, connectedLineOrigin
     
 
 
@@ -63,7 +49,7 @@ def remove_dense_points(connectedLine, connectedLineOrigin,stitchdistance,absoff
 #Strategy: A connection from parent to child is made where both curves come closest together.
 #Input:
 #-tree: contains the offsetted curves in a hierachical organized data structure.
-#-usedoffset: used offset when there offsetted curves were generated
+#-usedoffset: used offset when the offsetted curves were generated
 #-stitchdistance: maximum allowed distance between two points after sampling
 #-closePoint: defines the beginning point for stitching (stitching starts always from the undisplaced curve)
 #-offset_by_half: If true the resulting points are interlaced otherwise not.
@@ -170,8 +156,9 @@ def connect_raster_tree_nearest_neighbor(tree, usedoffset, stitchdistance, close
         #if (offset_by_half and (temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.NOT_NEEDED or
         #                        temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED)):
         #    continue
-        if (not offset_by_half and (temp_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED or
-                                    temp_origin[k] == LineStringSampling.PointSource.ENTER_LEAVING_POINT)):
+        if (not offset_by_half and temp_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED):
+            continue
+        if temp_origin[k] == LineStringSampling.PointSource.ENTER_LEAVING_POINT:
             continue
         #if (offset_by_half and ((temp_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED and temp_origin[(k+1) % len(temp_origin)] != LineStringSampling.PointSource.EDGE_NEEDED) or
         #                        (temp_origin[k] != LineStringSampling.PointSource.EDGE_NEEDED and temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.EDGE_NEEDED))):
@@ -350,7 +337,7 @@ def create_nearest_points_list(travel_line, children_list, threshold, threshold_
 # to stich afterwards from inner to outer. 
 #Input:
 #-tree: contains the offsetted curves in a hierachical organized data structure.
-#-usedoffset: used offset when there offsetted curves were generated
+#-usedoffset: used offset when the offsetted curves were generated
 #-stitchdistance: maximum allowed distance between two points after sampling
 #-closePoint: defines the beginning point for stitching (stitching starts always from the undisplaced curve)
 #-offset_by_half: If true the resulting points are interlaced otherwise not.
@@ -458,8 +445,9 @@ def connect_raster_tree_from_inner_to_outer(tree, usedoffset, stitchdistance, cl
         #if (offset_by_half and (temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.NOT_NEEDED or
         #                        temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED)):
         #    continue
-        if (not offset_by_half and (temp_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED or 
-                                    temp_origin[k] == LineStringSampling.PointSource.ENTER_LEAVING_POINT)):
+        if (not offset_by_half and temp_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED):
+            continue
+        if temp_origin[k] == LineStringSampling.PointSource.ENTER_LEAVING_POINT:
             continue
         #if (offset_by_half and ((temp_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED and temp_origin[(k+1) % len(temp_origin)] != LineStringSampling.PointSource.EDGE_NEEDED) or
         #                        (temp_origin[k] != LineStringSampling.PointSource.EDGE_NEEDED and temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.EDGE_NEEDED))):
@@ -476,12 +464,19 @@ def connect_raster_tree_from_inner_to_outer(tree, usedoffset, stitchdistance, cl
         to_transfer_point_list_origin.append(point_origin)
 
     assert(len(ownCoords) == len(ownCoordsOrigin))
-    if stitching_direction == -1: #since the projection is only in ccw direction towards inner we need to use "-usedoffset"
+    assert(len(to_transfer_point_list) == len(to_transfer_point_list_origin))
+    #since the projection is only in ccw direction towards inner we need to use "-usedoffset" for stitching_direction==-1
+    #print("1: ", len(to_transfer_point_list), ' - ', len(to_transfer_point_list_origin))
+    PointTransfer.transfer_transferred_points_also_to_childs(
+            tree, stitching_direction*usedoffset, False, stitchdistance, to_transfer_point_list, 
+            overnext_child=offset_by_half,transfer_forbidden_points= offset_by_half, to_transfer_points_origin=to_transfer_point_list_origin)
+    #print("1: ", len(to_transfer_point_list), ' - ', len(to_transfer_point_list_origin))
+    assert(len(to_transfer_point_list) == len(to_transfer_point_list_origin))
+    if offset_by_half:# and tree.parent == None:
         PointTransfer.transfer_transferred_points_also_to_childs(
-            tree, -usedoffset, offset_by_half, stitchdistance, to_transfer_point_list, False,to_transfer_point_list_origin)
-    else:
-        PointTransfer.transfer_transferred_points_also_to_childs(
-            tree, usedoffset, offset_by_half, stitchdistance, to_transfer_point_list, False,to_transfer_point_list_origin)
+            tree, stitching_direction*usedoffset, True, stitchdistance, to_transfer_point_list,
+            overnext_child=False,transfer_forbidden_points=False, to_transfer_points_origin=to_transfer_point_list_origin)
+
     assert(len(ownCoords) == len(ownCoordsOrigin))
    
     
