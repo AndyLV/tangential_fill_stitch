@@ -34,216 +34,160 @@ def cut(line, distance):
                 return LineString([(cp.x, cp.y)] + coords[i:]+coords[:i])
 
 
-def cyclic_distance(val1, val2, line_length):
-    absdiff = abs(val1-val2)
-    # if val1 < val2:
-    #print("Needed cyclic_distance")
-    return min(absdiff, line_length-absdiff)
-
-
-
-    
-
-
 #Takes the offsetted curves organized as tree, connects and samples them.
 #Strategy: A connection from parent to child is made where both curves come closest together.
 #Input:
 #-tree: contains the offsetted curves in a hierachical organized data structure.
-#-usedoffset: used offset when the offsetted curves were generated
-#-stitchdistance: maximum allowed distance between two points after sampling
-#-closePoint: defines the beginning point for stitching (stitching starts always from the undisplaced curve)
+#-used_offset: used offset when the offsetted curves were generated
+#-stitch_distance: maximum allowed distance between two points after sampling
+#-close_point: defines the beginning point for stitching (stitching starts always from the undisplaced curve)
 #-offset_by_half: If true the resulting points are interlaced otherwise not.
 #Returnvalues:
-#-All offsetted curves connected to one line and sampled with points obeying stitchdistance and offset_by_half
+#-All offsetted curves connected to one line and sampled with points obeying stitch_distance and offset_by_half
 #-Tag (origin) of each point to analyze why a point was placed at this position
-def connect_raster_tree_nearest_neighbor(tree, usedoffset, stitchdistance, closePoint, offset_by_half):
-    # We cut the current item so that its index 0 is closest to closePoint
-    currentCoords = tree.val
-    absoffset = abs(usedoffset)
-    resultCoords = []
-    resultCoords_Origin = []
+def connect_raster_tree_nearest_neighbor(tree, used_offset, stitch_distance, close_point, offset_by_half):
 
-    startDistance = tree.val.project(closePoint)
-    if startDistance > 0:
-        currentCoords = cut(currentCoords, startDistance)
-        tree.val = currentCoords
+    current_coords = tree.val
+    abs_offset = abs(used_offset)
+    result_coords = []
+    result_coords_origin = []
+
+    # We cut the current item so that its index 0 is closest to close_point
+    start_distance = tree.val.project(close_point)
+    if start_distance > 0:
+        current_coords = cut(current_coords, start_distance)
+        tree.val = current_coords
 
         if not tree.transferred_point_priority_deque.is_empty():
-            newDEPQ = DEPQ(iterable=None, maxlen=None)
+            new_DEPQ = DEPQ(iterable=None, maxlen=None)
             for item,priority in tree.transferred_point_priority_deque:
-                newDEPQ.insert(item, math.fmod(
-                    priority-startDistance+currentCoords.length, currentCoords.length))
-            tree.transferred_point_priority_deque = newDEPQ
+                new_DEPQ.insert(item, math.fmod(
+                    priority-start_distance+current_coords.length, current_coords.length))
+            tree.transferred_point_priority_deque = new_DEPQ
         #print("Gecutted")
 
-    ownCoords = []
-    ownCoordsOrigin = []
     stitching_direction = 1
-
     # This list should contain a tuple of nearest points between the current geometry
     # and the subgeometry, the projected distance along the current geometry,
     # and the belonging subtree node
-    nearestPointsList = []
+    nearest_points_list = []
     
     for subnode in tree.children:
-        point_parent, point_child = nearest_points(currentCoords, subnode.val)
-        #if point_pair[0].distance(point_pair[1]) > 1.5*absoffset:
-            #print("WARNING: sub geometry closest point is too far apart!")
-        projDistance = currentCoords.project(point_parent)
-        nearestPointsList.append(nearest_neighbor_tuple(nearest_point_parent = point_parent, 
+        point_parent, point_child = nearest_points(current_coords, subnode.val)
+        proj_distance = current_coords.project(point_parent)
+        nearest_points_list.append(nearest_neighbor_tuple(nearest_point_parent = point_parent, 
                                                         nearest_point_child = point_child,
-                                                        projected_distance_parent = projDistance,
+                                                        projected_distance_parent = proj_distance,
                                                         child_node=subnode))
-    nearestPointsList.sort(reverse=False, key=lambda tup: tup.projected_distance_parent)
+    nearest_points_list.sort(reverse=False, key=lambda tup: tup.projected_distance_parent)
 
-    if nearestPointsList:
-        start_distance = min(absoffset*constants.factor_offset_starting_points, nearestPointsList[0].projected_distance_parent)
+    if nearest_points_list:
+        start_distance = min(abs_offset*constants.factor_offset_starting_points, nearest_points_list[0].projected_distance_parent)
+        end_distance = max(current_coords.length-abs_offset*constants.factor_offset_starting_points, nearest_points_list[-1].projected_distance_parent)
     else:
-        start_distance = absoffset*constants.factor_offset_starting_points
+        start_distance = abs_offset*constants.factor_offset_starting_points
+        end_distance = current_coords.length-abs_offset*constants.factor_offset_starting_points
 
-    temp, temp_origin = LineStringSampling.rasterLineString2_Priority2(currentCoords, start_distance,  # We add/subtract absoffset/2 to not sample the same point again (avoid double points for start and end)
-                                                            currentCoords.length, stitchdistance, stitching_direction, tree.transferred_point_priority_deque, absoffset)
-    assert(len(temp) == len(temp_origin))
-    temp_origin[0] = LineStringSampling.PointSource.ENTER_LEAVING_POINT
-
-    # We might add the last point wich might not rastered by the previous method
-    lastpoint_distance = currentCoords.project(Point(temp[-1]))
-    # We use cyclic distance since the point can be assigned distance 0 if the last point is also the first point
-    lastpoint_distance = cyclic_distance(
-        lastpoint_distance, currentCoords.length, currentCoords.length)
-    assert(len(ownCoords) == len(ownCoordsOrigin))
-    delta = min(lastpoint_distance, absoffset)
-    if delta > constants.line_lengh_seen_as_one_point:
-        temp.append(currentCoords.interpolate(
-            currentCoords.length-delta/2).coords[0])
-        temp_origin.append(LineStringSampling.PointSource.ENTER_LEAVING_POINT)
-        # if (abs(temp[-1][0]-9.8) < 0.2 and abs(temp[-1][1]-141.1) < 0.2):
-        #    print("HIIER FOUNDED3")
-    else:
-        temp_origin[-1] = LineStringSampling.PointSource.ENTER_LEAVING_POINT
-
-
-    if len(temp) > 4:
-        ownCoords.extend(temp[1:-1]) # Take not the first an the last one since they are specific to the entering and leaving the geometry
-        ownCoordsOrigin.extend(temp_origin[1:-1])
-    else:
-        ownCoords.extend(temp)
-        ownCoordsOrigin.extend(temp_origin)
-
-    assert(len(ownCoords) == len(ownCoordsOrigin))
+    own_coords, own_coords_origin = LineStringSampling.raster_line_string_with_priority_points(current_coords, start_distance,  # We add/subtract an offset to not sample the same point again (avoid double points for start and end)
+                                                            end_distance, stitch_distance, stitching_direction, tree.transferred_point_priority_deque, abs_offset)
+    assert(len(own_coords) == len(own_coords_origin))
+    own_coords_origin[0] = LineStringSampling.PointSource.ENTER_LEAVING_POINT
+    own_coords_origin[-1] = LineStringSampling.PointSource.ENTER_LEAVING_POINT
     
-    tree.val = LineString(ownCoords)
-    tree.pointsourcelist = ownCoordsOrigin
+    #tree.val = LineString(own_coords)
+    #tree.pointsourcelist = own_coords_origin
     tree.stitching_direction = stitching_direction
     tree.already_rastered = True
-    assert(len(ownCoords) == len(ownCoordsOrigin))
 
     #Next we need to transfer our rastered points to siblings and childs
-    #First we start with the siblings:
-    PointTransfer.transfer_inner_points_to_surrounding2(
-        tree, usedoffset, offset_by_half, stitchdistance, False, False)  # Only used to transfer to possible siblings
-    assert(len(ownCoords) == len(ownCoordsOrigin))
     to_transfer_point_list = []
     to_transfer_point_list_origin = []
-    for k in range(1, len(temp)-1):
+    for k in range(1, len(own_coords)-1): #Do not take the first and the last since they are ENTER_LEAVING_POINT points for sure
         # if abs(temp[k][0]-5.25) < 0.5 and abs(temp[k][1]-42.9) < 0.5:
         #    print("HIER gefunden!")
-
-        #if(
-        #   temp_origin[k] == LineStringSampling.PointSource.NOT_NEEDED or
-        #   temp_origin[k] == LineStringSampling.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED):
-        #    continue
-        #if (offset_by_half and (temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.NOT_NEEDED or
-        #                        temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED)):
-        #    continue
-        if (not offset_by_half and temp_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED):
+        if (not offset_by_half and own_coords_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED):
             continue
-        if temp_origin[k] == LineStringSampling.PointSource.ENTER_LEAVING_POINT:
+        if own_coords_origin[k] == LineStringSampling.PointSource.ENTER_LEAVING_POINT or own_coords_origin[k] == LineStringSampling.PointSource.FORBIDDEN_POINT:
             continue
-        #if (offset_by_half and ((temp_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED and temp_origin[(k+1) % len(temp_origin)] != LineStringSampling.PointSource.EDGE_NEEDED) or
-        #                        (temp_origin[k] != LineStringSampling.PointSource.EDGE_NEEDED and temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.EDGE_NEEDED))):
-        #    continue
-        to_transfer_point_list.append(Point(temp[k]))
-        point_origin = temp_origin[k]
-        #if (offset_by_half and point_origin != LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED):
-        #    if(temp_origin[(k+1)%len(temp_origin)]==LineStringSampling.PointSource.EDGE_NEEDED):
-        #        point_origin = LineStringSampling.PointSource.EDGE_NEEDED
-        #    elif temp_origin[(k+1)%len(temp_origin)]==LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED:
-        #        point_origin = LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED
-
-            
+        to_transfer_point_list.append(Point(own_coords[k]))
+        point_origin = own_coords_origin[k]          
         to_transfer_point_list_origin.append(point_origin)
 
-    assert(len(ownCoords) == len(ownCoordsOrigin))
-    #Next we transfer to the childs
-    PointTransfer.transfer_transferred_points_also_to_childs(
-        tree, usedoffset, offset_by_half, stitchdistance, to_transfer_point_list, False,to_transfer_point_list_origin)
-    assert(len(ownCoords) == len(ownCoordsOrigin))
-    
 
-    if not nearestPointsList:
-        resultCoords = temp
-        resultCoords_Origin = temp_origin
+    #since the projection is only in ccw direction towards inner we need to use "-used_offset" for stitching_direction==-1
+    PointTransfer.transfer_points_to_surrounding(tree,stitching_direction*used_offset,offset_by_half,stitch_distance, 
+                                                 to_transfer_point_list,to_transfer_point_list_origin,overnext_neighbor=False,
+                                                 transfer_forbidden_points=False,transfer_to_parent=False,transfer_to_sibling=True,transfer_to_child=True)
+
+    
+    #We transfer also to the overnext child to get a more straight arrangement of points perpendicular to the stitching lines
+    if offset_by_half:
+        PointTransfer.transfer_points_to_surrounding(tree,stitching_direction*used_offset,False,stitch_distance, 
+                                                 to_transfer_point_list,to_transfer_point_list_origin,overnext_neighbor=True,
+                                                 transfer_forbidden_points=False,transfer_to_parent=False,transfer_to_sibling=True,transfer_to_child=True)
+
+    if not nearest_points_list:
+        #If there is no child (inner geometry) we can simply take our own rastered coords as result
+        result_coords = own_coords
+        result_coords_origin = own_coords_origin
     else:
-        # if len(nearestPointsList) > 1:
-        #    print("HIERRR!")
+        #There are childs so we need to merge their coordinates with our own rastered coords
 
         #To create a closed ring
-        temp.append(temp[0])
-        temp_origin.append(temp_origin[0])
+        own_coords.append(own_coords[0])
+        own_coords_origin.append(own_coords_origin[0])
 
 
-        # temp does not start with currentCoords but has an offset (see call of rasterLineString2_Priority2)
-        total_distance = absoffset*constants.factor_offset_starting_points
+        #own_coords does not start with current_coords but has an offset (see call of raster_line_string_with_priority_points)
+        total_distance = start_distance
         current_item_index = 0
-        resultCoords = [temp[0]]
-        resultCoords_Origin = [LineStringSampling.PointSource.ENTER_LEAVING_POINT]
-        for i in range(1, len(temp)):
-            next_distance = math.sqrt((temp[i][0]-temp[i-1][0])**2 +
-                                      (temp[i][1]-temp[i-1][1])**2)
-            while (current_item_index < len(nearestPointsList) and
-                    total_distance+next_distance+constants.eps > nearestPointsList[current_item_index].projected_distance_parent):
-               # was_inside = True
-                item = nearestPointsList[current_item_index]
-                temp3, temp3_origin = connect_raster_tree_nearest_neighbor(
-                    item.child_node, usedoffset, stitchdistance, item.nearest_point_child, offset_by_half)
+        result_coords = [own_coords[0]]
+        result_coords_origin = [LineStringSampling.PointSource.ENTER_LEAVING_POINT]
+        for i in range(1, len(own_coords)):
+            next_distance = math.sqrt((own_coords[i][0]-own_coords[i-1][0])**2 +
+                                      (own_coords[i][1]-own_coords[i-1][1])**2)
+            while (current_item_index < len(nearest_points_list) and
+                    total_distance+next_distance+constants.eps > nearest_points_list[current_item_index].projected_distance_parent):
 
-                delta = item.nearest_point_parent.distance(Point(temp[i-1]))
-                if delta > absoffset*constants.factor_offset_starting_points:
-                    resultCoords.append(item.nearest_point_parent.coords[0])
-                    resultCoords_Origin.append(LineStringSampling.PointSource.ENTER_LEAVING_POINT)
+                item = nearest_points_list[current_item_index]
+                child_coords, child_coords_origin = connect_raster_tree_nearest_neighbor(
+                    item.child_node, used_offset, stitch_distance, item.nearest_point_child, offset_by_half)
+
+                delta = item.nearest_point_parent.distance(Point(own_coords[i-1]))
+                if delta > abs_offset*constants.factor_offset_starting_points:
+                    result_coords.append(item.nearest_point_parent.coords[0])
+                    result_coords_origin.append(LineStringSampling.PointSource.ENTER_LEAVING_POINT)
                 # reversing avoids crossing when entering and leaving the child segment
-                resultCoords.extend(temp3[::-1])
-                resultCoords_Origin.extend(temp3_origin[::-1])
+                result_coords.extend(child_coords[::-1])
+                result_coords_origin.extend(child_coords_origin[::-1])
 
-                delta = item.nearest_point_parent.distance(Point(temp[i]))
-                if current_item_index < len(nearestPointsList)-1:
+
+                #And here we calculate the point for the leaving
+                delta = item.nearest_point_parent.distance(Point(own_coords[i]))
+                if current_item_index < len(nearest_points_list)-1:
                     delta = min(delta, abs(
-                        nearestPointsList[current_item_index+1].projected_distance_parent-item.projected_distance_parent))
+                        nearest_points_list[current_item_index+1].projected_distance_parent-item.projected_distance_parent))
 
-                if delta > absoffset*constants.factor_offset_starting_points:
-                    resultCoords.append(currentCoords.interpolate(
-                        item.projected_distance_parent+absoffset*constants.factor_offset_starting_points).coords[0])
-                    resultCoords_Origin.append(LineStringSampling.PointSource.ENTER_LEAVING_POINT)
+                if delta > abs_offset*constants.factor_offset_starting_points:
+                    result_coords.append(current_coords.interpolate(
+                        item.projected_distance_parent+abs_offset*constants.factor_offset_starting_points).coords[0])
+                    result_coords_origin.append(LineStringSampling.PointSource.ENTER_LEAVING_POINT)
 
                 current_item_index += 1
-            if i < len(temp)-1:
-                if(Point(resultCoords[-1]).distance(Point(temp[i])) > absoffset*constants.factor_offset_remove_points):
-                    resultCoords.append(temp[i])
-                    resultCoords_Origin.append(temp_origin[i])
+            if i < len(own_coords)-1:
+                if(Point(result_coords[-1]).distance(Point(own_coords[i])) > abs_offset*constants.factor_offset_remove_points):
+                    result_coords.append(own_coords[i])
+                    result_coords_origin.append(own_coords_origin[i])
 
-            # Since currentCoords and temp are rastered differently there accumulate errors regarding the current distance.
+            # Since current_coords and temp are rastered differently there accumulate errors regarding the current distance.
             # Since a projection of each point in temp would be very time consuming we project only every n-th point which resets the accumulated error every n-th point.
             if i % 20 == 0:
-                total_distance = currentCoords.project(Point(temp[i]))
+                total_distance = current_coords.project(Point(own_coords[i]))
             else:
                 total_distance += next_distance
 
-    assert(len(ownCoords) == len(ownCoordsOrigin))
-    assert(len(resultCoords) == len(resultCoords_Origin))
-
-    return resultCoords, resultCoords_Origin
-    #return remove_dense_points(resultCoords, resultCoords_Origin, stitchdistance,absoffset)
+    assert(len(result_coords) == len(result_coords_origin))
+    return result_coords, result_coords_origin
 
 #Takes a line and calculates the nearest distance along this line to enter the next_line
 #Input:
@@ -332,220 +276,202 @@ def create_nearest_points_list(travel_line, children_list, threshold, threshold_
         return (-1, result_list_reversed_order)
 
 
+def calculate_replacing_middle_point(line_segment, abs_offset,max_stich_distance):
+    angles = LineStringSampling.calculate_line_angles(line_segment)
+    if angles[1] < abs_offset*constants.limiting_angle_straight:
+        if line_segment.length < max_stich_distance:
+            return None
+        else:
+            return line_segment.interpolate(line_segment.length-max_stich_distance).coords[0]
+    else:
+        return line_segment.coords[1]
+
 #Takes the offsetted curves organized as tree, connects and samples them.
 #Strategy: A connection from parent to child is made as fast as possible to reach the innermost child as fast as possible in order
 # to stich afterwards from inner to outer. 
 #Input:
 #-tree: contains the offsetted curves in a hierachical organized data structure.
-#-usedoffset: used offset when the offsetted curves were generated
-#-stitchdistance: maximum allowed distance between two points after sampling
-#-closePoint: defines the beginning point for stitching (stitching starts always from the undisplaced curve)
+#-used_offset: used offset when the offsetted curves were generated
+#-stitch_distance: maximum allowed distance between two points after sampling
+#-close_point: defines the beginning point for stitching (stitching starts always from the undisplaced curve)
 #-offset_by_half: If true the resulting points are interlaced otherwise not.
 #Returnvalues:
-#-All offsetted curves connected to one line and sampled with points obeying stitchdistance and offset_by_half
+#-All offsetted curves connected to one line and sampled with points obeying stitch_distance and offset_by_half
 #-Tag (origin) of each point to analyze why a point was placed at this position
-def connect_raster_tree_from_inner_to_outer(tree, usedoffset, stitchdistance, closePoint, offset_by_half):
-    # We cut the current item so that its index 0 is closest to closePoint
-    currentCoords = tree.val
-    absoffset = abs(usedoffset)
-    resultCoords = []
-    resultCoords_Origin = []
+def connect_raster_tree_from_inner_to_outer(tree, used_offset, stitch_distance, close_point, offset_by_half):
 
-    startDistance = tree.val.project(closePoint)
-    if startDistance > 0:
-        currentCoords = cut(currentCoords, startDistance)
-        tree.val = currentCoords
-        # print("After cut")
-        # checkTree(tree)
+    current_coords = tree.val
+    abs_offset = abs(used_offset)
+    result_coords = []
+    result_coords_origin = []
+
+    start_distance = tree.val.project(close_point)
+    # We cut the current path so that its index 0 is closest to close_point
+    if start_distance > 0:
+        current_coords = cut(current_coords, start_distance)
+        tree.val = current_coords
+
         if not tree.transferred_point_priority_deque.is_empty():
-            newDEPQ = DEPQ(iterable=None, maxlen=None)
+            new_DEPQ = DEPQ(iterable=None, maxlen=None)
             for item, priority in tree.transferred_point_priority_deque:
-                newDEPQ.insert(item, math.fmod(
-                    priority-startDistance+currentCoords.length, currentCoords.length))
-            tree.transferred_point_priority_deque = newDEPQ
-        #print("Gecutted")
-
-    ownCoords = []
-    ownCoordsOrigin = []
+                new_DEPQ.insert(item, math.fmod(
+                    priority-start_distance+current_coords.length, current_coords.length))
+            tree.transferred_point_priority_deque = new_DEPQ
 
     #We try to use always the opposite stitching direction with respect to the parent to avoid crossings when entering and leaving the child
     parent_stitching_direction = -1
     if tree.parent != None:
         parent_stitching_direction = tree.parent.stitching_direction
-    stitching_direction, nearestPointsList = create_nearest_points_list(currentCoords, tree.children, 1.5*absoffset,2.05*absoffset,-parent_stitching_direction)
-    nearestPointsList.sort(reverse=False, key=lambda tup: tup.projected_distance_parent)
 
+    #find the nearest point in current_coords and its children and sort it along the stitching direction
+    stitching_direction, nearest_points_list = create_nearest_points_list(current_coords, tree.children, 1.5*abs_offset,2.05*abs_offset,parent_stitching_direction)
+    nearest_points_list.sort(reverse=False, key=lambda tup: tup.projected_distance_parent)
 
-    temp = []
-    temp_origin = []
-    if nearestPointsList:
-        startoffset = min(absoffset*constants.factor_offset_starting_points, nearestPointsList[0].projected_distance_parent)
-        endoffset = max(currentCoords.length-absoffset*constants.factor_offset_starting_points, nearestPointsList[-1].projected_distance_parent)
+    #Have a small offset for the starting and ending to avoid double points at start and end point (since the paths are closed rings)
+    if nearest_points_list:
+        start_offset = min(abs_offset*constants.factor_offset_starting_points, nearest_points_list[0].projected_distance_parent)
+        end_offset = max(current_coords.length-abs_offset*constants.factor_offset_starting_points, nearest_points_list[-1].projected_distance_parent)
     else:
-        startoffset = absoffset*constants.factor_offset_starting_points
-        endoffset = currentCoords.length-absoffset*constants.factor_offset_starting_points
+        start_offset = abs_offset*constants.factor_offset_starting_points
+        end_offset = current_coords.length-abs_offset*constants.factor_offset_starting_points
     
 
     if stitching_direction == 1:
-        temp, temp_origin = LineStringSampling.rasterLineString2_Priority2(currentCoords, startoffset,  # We add startoffset to not sample the same point again (avoid double points for start and end)
-                                                            endoffset, stitchdistance, stitching_direction, tree.transferred_point_priority_deque, absoffset)
+        own_coords, own_coords_origin = LineStringSampling.raster_line_string_with_priority_points(current_coords, start_offset,  # We add start_offset to not sample the same point again (avoid double points for start and end)
+                                                            end_offset, stitch_distance, stitching_direction, tree.transferred_point_priority_deque, abs_offset)
     else:
-        temp, temp_origin = LineStringSampling.rasterLineString2_Priority2(currentCoords, currentCoords.length-startoffset,  # We subtract startoffset to not sample the same point again (avoid double points for start and end)
-                                                            currentCoords.length-endoffset, stitchdistance, stitching_direction, tree.transferred_point_priority_deque, absoffset)
-        currentCoords.coords = currentCoords.coords[::-1] 
+        own_coords, own_coords_origin = LineStringSampling.raster_line_string_with_priority_points(current_coords, current_coords.length-start_offset,  # We subtract start_offset to not sample the same point again (avoid double points for start and end)
+                                                            current_coords.length-end_offset, stitch_distance, stitching_direction, tree.transferred_point_priority_deque, abs_offset)
+        current_coords.coords = current_coords.coords[::-1] 
 
-    # We add the last point wich might not rastered by the previous method
-    lastpoint_distance = currentCoords.project(Point(temp[-1]))
-    # We use cyclic distance since the point can be assigned distance 0 if the last point is also the first point
-    lastpoint_distance = cyclic_distance(
-        lastpoint_distance, currentCoords.length, currentCoords.length)
-    assert(len(ownCoords) == len(ownCoordsOrigin))
-    delta = min(lastpoint_distance, absoffset)
-    if delta > constants.line_lengh_seen_as_one_point:
-        temp.append(currentCoords.interpolate(
-            currentCoords.length-delta/2).coords[0]) 
-        temp_origin.append(LineStringSampling.PointSource.ENTER_LEAVING_POINT)
-        #if (abs(temp[-1][0]-61.7) < 0.2 and abs(temp[-1][1]-105.1) < 0.2):
-        #    print("HIIER FOUNDED3")
-    else:
-        temp_origin[-1] = LineStringSampling.PointSource.ENTER_LEAVING_POINT
+    #Adjust the points origin for start and end (so that they might not be transferred to childs)
+    #if own_coords_origin[-1] != LineStringSampling.PointSource.HARD_EDGE:
+    #    own_coords_origin[-1] = LineStringSampling.PointSource.ENTER_LEAVING_POINT
+    #if own_coords_origin[0] != LineStringSampling.PointSource.HARD_EDGE:
+    #    own_coords_origin[0] = LineStringSampling.PointSource.ENTER_LEAVING_POINT
+    assert(len(own_coords) == len(own_coords_origin))
 
-    temp_origin[0] = LineStringSampling.PointSource.ENTER_LEAVING_POINT
-    assert(len(temp) == len(temp_origin))
-
-    if len(temp) > 4:
-        ownCoords.extend(temp[1:-1]) #Do not take the Enter and Leaving point into account
-        ownCoordsOrigin.extend(temp_origin[1:-1])
-    else:
-        ownCoords.extend(temp)
-        ownCoordsOrigin.extend(temp_origin)
-
-    assert(len(ownCoords) == len(ownCoordsOrigin))
-    
-    #Next we need to transfer our rastered points to siblings and childs
-    #First we start with the siblings:
-    tree.val = LineString(ownCoords)
-    tree.pointsourcelist = ownCoordsOrigin
+    #tree.val = LineString(own_coords)
+    #tree.pointsourcelist = own_coords_origin
     tree.stitching_direction = stitching_direction
     tree.already_rastered = True
-    assert(len(ownCoords) == len(ownCoordsOrigin))
-    PointTransfer.transfer_inner_points_to_surrounding2(
-        tree, usedoffset, offset_by_half, stitchdistance, False, False)  # Only used to transfer to possible siblings
-    assert(len(ownCoords) == len(ownCoordsOrigin))
+
+    
     to_transfer_point_list = []
     to_transfer_point_list_origin = []
-    for k in range(1, len(temp)-1):
-        # if abs(temp[k][0]-5.25) < 0.5 and abs(temp[k][1]-42.9) < 0.5:
-        #    print("HIER gefunden!")
-
-        #if(
-        #   temp_origin[k] == LineStringSampling.PointSource.NOT_NEEDED or
-        #   temp_origin[k] == LineStringSampling.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED):
-        #    continue
-        #if (offset_by_half and (temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.NOT_NEEDED or
-        #                        temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.ADDITIONAL_TRACKING_POINT_NOT_NEEDED)):
-        #    continue
-        if (not offset_by_half and temp_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED):
+    for k in range(0, len(own_coords)): #TODO: maybe do not take the first and the last since they are ENTER_LEAVING_POINT points for sure
+        if (not offset_by_half and own_coords_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED or own_coords_origin[k] == LineStringSampling.PointSource.FORBIDDEN_POINT):
             continue
-        if temp_origin[k] == LineStringSampling.PointSource.ENTER_LEAVING_POINT:
+        if own_coords_origin[k] == LineStringSampling.PointSource.ENTER_LEAVING_POINT:
             continue
-        #if (offset_by_half and ((temp_origin[k] == LineStringSampling.PointSource.EDGE_NEEDED and temp_origin[(k+1) % len(temp_origin)] != LineStringSampling.PointSource.EDGE_NEEDED) or
-        #                        (temp_origin[k] != LineStringSampling.PointSource.EDGE_NEEDED and temp_origin[(k+1) % len(temp_origin)] == LineStringSampling.PointSource.EDGE_NEEDED))):
-        #    continue
-        to_transfer_point_list.append(Point(temp[k]))
-        point_origin = temp_origin[k]
-        #if (offset_by_half and point_origin != LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED):
-        #    if(temp_origin[(k+1)%len(temp_origin)]==LineStringSampling.PointSource.EDGE_NEEDED):
-        #        point_origin = LineStringSampling.PointSource.EDGE_NEEDED
-        #    elif temp_origin[(k+1)%len(temp_origin)]==LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED:
-        #        point_origin = LineStringSampling.PointSource.EDGE_PREVIOUSLY_SHIFTED
+        to_transfer_point_list.append(Point(own_coords[k]))
+        to_transfer_point_list_origin.append(own_coords_origin[k])
 
-            
-        to_transfer_point_list_origin.append(point_origin)
-
-    assert(len(ownCoords) == len(ownCoordsOrigin))
     assert(len(to_transfer_point_list) == len(to_transfer_point_list_origin))
-    #since the projection is only in ccw direction towards inner we need to use "-usedoffset" for stitching_direction==-1
-    #print("1: ", len(to_transfer_point_list), ' - ', len(to_transfer_point_list_origin))
-    PointTransfer.transfer_transferred_points_also_to_childs(
-            tree, stitching_direction*usedoffset, False, stitchdistance, to_transfer_point_list, 
-            overnext_child=offset_by_half,transfer_forbidden_points= offset_by_half, to_transfer_points_origin=to_transfer_point_list_origin)
-    #print("1: ", len(to_transfer_point_list), ' - ', len(to_transfer_point_list_origin))
-    assert(len(to_transfer_point_list) == len(to_transfer_point_list_origin))
-    if offset_by_half:# and tree.parent == None:
-        PointTransfer.transfer_transferred_points_also_to_childs(
-            tree, stitching_direction*usedoffset, True, stitchdistance, to_transfer_point_list,
-            overnext_child=False,transfer_forbidden_points=False, to_transfer_points_origin=to_transfer_point_list_origin)
 
-    assert(len(ownCoords) == len(ownCoordsOrigin))
-   
+
+    #Next we need to transfer our rastered points to siblings and childs
+
     
-    if not nearestPointsList:
-        resultCoords = temp
-        resultCoords_Origin = temp_origin
+    #since the projection is only in ccw direction towards inner we need to use "-used_offset" for stitching_direction==-1
+    PointTransfer.transfer_points_to_surrounding(tree,stitching_direction*used_offset,offset_by_half,stitch_distance, 
+                                                 to_transfer_point_list,to_transfer_point_list_origin,overnext_neighbor=False,
+                                                 transfer_forbidden_points=False,transfer_to_parent=False,transfer_to_sibling=True,transfer_to_child=True)
+
+    
+    #We transfer also to the overnext child to get a more straight arrangement of points perpendicular to the stitching lines
+    if offset_by_half:
+        PointTransfer.transfer_points_to_surrounding(tree,stitching_direction*used_offset,False,stitch_distance, 
+                                                 to_transfer_point_list,to_transfer_point_list_origin,overnext_neighbor=True,
+                                                 transfer_forbidden_points=False,transfer_to_parent=False,transfer_to_sibling=True,transfer_to_child=True)
+    
+    if not nearest_points_list:
+        #If there is no child (inner geometry) we can simply take our own rastered coords as result
+        result_coords = own_coords
+        result_coords_origin = own_coords_origin
     else:
-        # if len(nearestPointsList) > 1:
-        #    print("HIERRR!")
+        #There are childs so we need to merge their coordinates with our own rastered coords
 
         #Create a closed ring for the following code
-        temp.append(temp[0])
-        temp_origin.append(temp_origin[0])
+        own_coords.append(own_coords[0])
+        own_coords_origin.append(own_coords_origin[0])
 
-        #print("Nearest Distance Proj: ", nearestPointsList[0][1])
-        # temp does not start with currentCoords but has an offset (see call of rasterLineString2_Priority2)
-        total_distance = startoffset
+        # own_coords does not start with current_coords but has an offset (see call of raster_line_string_with_priority_points)
+        total_distance = start_offset
 
         current_item_index = 0
-        resultCoords = [temp[0]]
-        resultCoords_Origin = [temp_origin[0]]
+        result_coords = [own_coords[0]]
+        result_coords_origin = [own_coords_origin[0]]
 
-        for i in range(1, len(temp)):
-            next_distance = math.sqrt((temp[i][0]-temp[i-1][0])**2 +
-                                      (temp[i][1]-temp[i-1][1])**2)
-            while (current_item_index < len(nearestPointsList) and
-                    total_distance+next_distance+constants.eps > nearestPointsList[current_item_index].projected_distance_parent):
-               # was_inside = True
-                item = nearestPointsList[current_item_index]
-                temp3, temp3_origin = connect_raster_tree_from_inner_to_outer(
-                    item.child_node, usedoffset, stitchdistance, item.nearest_point_child, offset_by_half)
+        for i in range(1, len(own_coords)):
+            next_distance = math.sqrt((own_coords[i][0]-own_coords[i-1][0])**2 +
+                                      (own_coords[i][1]-own_coords[i-1][1])**2)
+            while (current_item_index < len(nearest_points_list) and
+                    total_distance+next_distance+constants.eps > nearest_points_list[current_item_index].projected_distance_parent):
+                #The current and the next point in own_coords enclose the nearest point tuple between this geometry and the child geometry. 
+                #Hence we need to insert the child geometry points here before the next point of own_coords.
+                item = nearest_points_list[current_item_index]
+                child_coords, child_coords_origin = connect_raster_tree_from_inner_to_outer(
+                    item.child_node, used_offset, stitch_distance, item.nearest_point_child, offset_by_half)
 
-                if(Point(resultCoords[-1]).distance(item.nearest_point_parent) > constants.factor_offset_starting_points*absoffset):    
-                    resultCoords.append(item.nearest_point_parent.coords[0])
-                    resultCoords_Origin.append(LineStringSampling.PointSource.ENTER_LEAVING_POINT)
-                #if (abs(resultCoords[-1][0]-61.7) < 0.2 and abs(resultCoords[-1][1]-105.1) < 0.2):
+                #Imagine the nearest point of the child is within a long segment of the parent. Without additonal points
+                #on the parent side this would cause noticeable deviations. Hence we add here points shortly before and after
+                #the entering of the child to have only minor deviations to the desired shape.
+                #Here is the point for the entering:
+                if(Point(result_coords[-1]).distance(item.nearest_point_parent) > constants.factor_offset_starting_points*abs_offset):    
+                    result_coords.append(item.nearest_point_parent.coords[0])
+                    result_coords_origin.append(LineStringSampling.PointSource.ENTER_LEAVING_POINT)
+                #if (abs(result_coords[-1][0]-61.7) < 0.2 and abs(result_coords[-1][1]-105.1) < 0.2):
                 #    print("HIIER FOUNDED3")
                 
-                # reversing avoids crossing when entering and leaving the child segment
-                resultCoords.extend(temp3)
-                resultCoords_Origin.extend(temp3_origin)
+                #Check whether  the number of points of the connecting lines from child to child can be reduces
+                if len(child_coords) > 1:
+                    point = calculate_replacing_middle_point(LineString([result_coords[-1],child_coords[0],child_coords[1]]),abs_offset,stitch_distance)
+                    #if (abs(result_coords[-1][0]-8.9) < 0.2 and abs(result_coords[-1][1]-8.9) < 0.2):
+                    #    print("HIIER FOUNDED3")
+                    if point != None:
+                        #if (abs(point[0]-17.8) < 0.2 and abs(point[1]-17.8) < 0.2):
+                        #    print("HIIER FOUNDED3")
+                        result_coords.append(point)
+                        result_coords_origin.append(child_coords_origin[0])
+                    
+                    result_coords.extend(child_coords[1:])
+                    result_coords_origin.extend(child_coords_origin[1:])
+                else:
+                    result_coords.extend(child_coords)
+                    result_coords_origin.extend(child_coords_origin)
 
-                delta = item.nearest_point_parent.distance(Point(temp[i]))
-                if current_item_index < len(nearestPointsList)-1:
+                #And here is the point for the leaving of the child (distance to the own following point should not be too large)
+                delta = item.nearest_point_parent.distance(Point(own_coords[i]))
+                if current_item_index < len(nearest_points_list)-1:
                     delta = min(delta, abs(
-                        nearestPointsList[current_item_index+1].projected_distance_parent-item.projected_distance_parent))
+                        nearest_points_list[current_item_index+1].projected_distance_parent-item.projected_distance_parent))
 
-                if delta > constants.factor_offset_starting_points*absoffset:
-                    resultCoords.append(currentCoords.interpolate(
-                        item.projected_distance_parent+2*constants.factor_offset_starting_points*absoffset).coords[0]) 
-                    resultCoords_Origin.append(LineStringSampling.PointSource.ENTER_LEAVING_POINT)
-                #if (abs(resultCoords[-1][0]-61.7) < 0.2 and abs(resultCoords[-1][1]-105.1) < 0.2):
+                if delta > constants.factor_offset_starting_points*abs_offset:
+                    result_coords.append(current_coords.interpolate(
+                        item.projected_distance_parent+2*constants.factor_offset_starting_points*abs_offset).coords[0]) 
+                    result_coords_origin.append(LineStringSampling.PointSource.ENTER_LEAVING_POINT)
+                    #check whether this additional point makes the last point of the child unnecessary
+                    point = calculate_replacing_middle_point(LineString([result_coords[-3],result_coords[-2],result_coords[-1]]),abs_offset,stitch_distance)
+                    if point == None:
+                        result_coords.pop(-2)
+                        result_coords_origin.pop(-2)
+
+                #if (abs(result_coords[-1][0]-61.7) < 0.2 and abs(result_coords[-1][1]-105.1) < 0.2):
                 #    print("HIIER FOUNDED3")
 
                 current_item_index += 1
-            if i < len(temp)-1:
-                if(Point(resultCoords[-1]).distance(Point(temp[i])) > absoffset*constants.factor_offset_remove_points):
-                    resultCoords.append(temp[i])
-                    resultCoords_Origin.append(temp_origin[i])
+            if i < len(own_coords)-1:
+                if(Point(result_coords[-1]).distance(Point(own_coords[i])) > abs_offset*constants.factor_offset_remove_points):
+                    result_coords.append(own_coords[i])
+                    result_coords_origin.append(own_coords_origin[i])
 
-            # Since currentCoords and temp are rastered differently there accumulate errors regarding the current distance.
-            # Since a projection of each point in temp would be very time consuming we project only every n-th point which resets the accumulated error every n-th point.
+            # Since current_coords and own_coords are rastered differently there accumulate errors regarding the current distance.
+            # Since a projection of each point in own_coords would be very time consuming we project only every n-th point which resets the accumulated error every n-th point.
             if i % 20 == 0:
-                total_distance = currentCoords.project(Point(temp[i]))
+                total_distance = current_coords.project(Point(own_coords[i]))
             else:
                 total_distance += next_distance
 
-    assert(len(ownCoords) == len(ownCoordsOrigin))
-    assert(len(resultCoords) == len(resultCoords_Origin))
-
-    #return remove_dense_points(resultCoords, resultCoords_Origin, stitchdistance,absoffset)
-    return resultCoords, resultCoords_Origin
+    assert(len(result_coords) == len(result_coords_origin))
+    return result_coords, result_coords_origin
